@@ -1,0 +1,19 @@
+# Secrets
+.env
+firebase.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Data / runtime files
+data/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
