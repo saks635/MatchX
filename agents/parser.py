@@ -10,6 +10,15 @@ from collections import Counter, defaultdict
 import logging
 from PyPDF2 import PdfReader
 import hashlib
+try:
+    from PIL import Image
+    import easyocr
+    EASYOCR_AVAILABLE = True
+except ImportError:
+    EASYOCR_AVAILABLE = False
+    easyocr = None
+    Image = None
+
 
 
 # 🔥 WINDOWS UNICODE FIX (CRITICAL)
@@ -18,8 +27,10 @@ if sys.platform.startswith('win'):
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 
+
 def safe_arrow():
     return " -> " if sys.platform.startswith('win') else " → "
+
 
 
 # 🔥 WINDOWS-SAFE LOGGING
@@ -34,8 +45,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+
 class ResumeParserV2:
-    """🔥 PRODUCTION-GRADE Resume Parser - Windows Compatible"""
+    """🔥 PRODUCTION-GRADE Resume Parser - Windows Compatible + Image OCR"""
     
     SKILLS_DATABASE = {
         'programming': ['python', 'java', 'javascript', 'typescript', 'cpp', 'c++', 'c#', 'go', 'rust', 'swift', 'kotlin', 'scala', 'php', 'ruby'],
@@ -48,6 +60,13 @@ class ResumeParserV2:
     
     def __init__(self):
         self.cache = {}
+        # 🔥 Initialize EasyOCR reader once (expensive operation)
+        if EASYOCR_AVAILABLE:
+            self.ocr_reader = easyocr.Reader(['en'])
+            logger.info("✅ EasyOCR initialized for image processing")
+        else:
+            self.ocr_reader = None
+            logger.warning("⚠️ EasyOCR not available - install: pip install easyocr pillow")
     
     def process_resume(self, file_path: str) -> Dict[str, Any]:
         file_hash = self._get_file_hash(file_path)
@@ -71,7 +90,39 @@ class ResumeParserV2:
         file_ext = Path(file_path).suffix.lower()
         if file_ext == ".pdf":
             return self._extract_pdf_advanced(file_path)
+        elif file_ext in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
+            return self._extract_image_ocr(file_path)
         return self._extract_text_file(file_path)
+    
+    def _extract_image_ocr(self, file_path: str) -> str:
+        """🔥 NEW: Extract text from image resumes using EasyOCR"""
+        if not EASYOCR_AVAILABLE or not self.ocr_reader:
+            logger.warning(f"❌ OCR not available for {file_path}")
+            return ""
+        
+        try:
+            arrow = safe_arrow()
+            logger.info(f"🖼️ Processing image{arrow}{file_path}")
+            
+            # OCR extraction
+            results = self.ocr_reader.readtext(file_path)
+            
+            # Clean and join text
+            full_text = []
+            for (bbox, text, confidence) in results:
+                if confidence > 0.3:  # Filter low-confidence detections
+                    clean_text = re.sub(r'[^\w\s\-@.]', ' ', text)  # Clean special chars
+                    clean_text = ' '.join(clean_text.split())  # Normalize spaces
+                    if len(clean_text) > 2:
+                        full_text.append(clean_text)
+            
+            result = ' '.join(full_text)[:5000]
+            logger.info(f"OCR: {len(results)} detections{arrow}{len(result)} chars")
+            return result
+            
+        except Exception as e:
+            logger.error(f"OCR failed: {e}")
+            return ""
     
     def _extract_pdf_advanced(self, file_path: str) -> str:
         try:
@@ -188,23 +239,33 @@ class ResumeParserV2:
         return hash_md5.hexdigest()
 
 
+
 # 🔥 BACKWARD COMPATIBILITY FUNCTIONS
 def extract_text(file_path: str) -> str:
     return ResumeParserV2().extract_text(file_path)
+
 
 
 def extract_basic_info(text: str) -> Dict[str, Any]:
     return ResumeParserV2().extract_basic_info(text)
 
 
+
 def process_resume(file_path: str) -> Dict[str, Any]:
     return ResumeParserV2().process_resume(file_path)
 
 
+
 if __name__ == "__main__":
-    test_file = "data/resume/resume.pdf"
-    if os.path.exists(test_file):
-        result = process_resume(test_file)
-        print(f"✅ Resume: {result['name']} - {len(result['skills_detected'])} skills")
-    else:
-        print("📄 No test resume found at data/resume/resume.pdf")
+    test_files = [
+        "data/resume/resume.pdf",
+        "data/resume/resume.jpg",  # 🔥 NEW: Test image support
+        "data/resume/resume.png"
+    ]
+    
+    for test_file in test_files:
+        if os.path.exists(test_file):
+            result = process_resume(test_file)
+            print(f"✅ Resume: {result['name']} - {len(result['skills_detected'])} skills")
+        else:
+            print(f"📄 No test file found at {test_file}")
